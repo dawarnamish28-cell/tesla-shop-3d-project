@@ -6,14 +6,14 @@ export default function AppearanceMenu({ mode, selected, loaded, unavailable, wa
   onSelect: (id: string) => void; onClose: () => void
 }) {
   const options = appearanceOptions[mode]
-  const current = options.find(option => option.id === selected)!
+  const current = options.find(option => option.id === selected) || options[0]
   return <div className={`appearance-menu ${mode}`} id={`appearance-${mode}`} role="group" aria-label={mode === 'paint' ? 'Body colour' : 'Wheel design'}>
-    <div className="appearance-heading"><span>{mode === 'paint' ? 'Paint' : 'Wheels'}</span><button className="appearance-close" onClick={onClose} aria-label="Close and restore original vehicle"><X size={16} strokeWidth={1.5}/></button></div>
+    <div className="appearance-heading"><span>{mode === 'paint' ? 'Paint' : 'Wheels'}</span><button className="appearance-close" onClick={onClose} aria-label="Close configurator"><X size={16} strokeWidth={1.5}/></button></div>
     <div className="appearance-options">
-      {options.map(option => <button key={option.id} className={`appearance-option ${option.id === selected ? 'selected' : ''}`} disabled={waiting || !loaded.has(option.image)} aria-label={`${option.label}${unavailable.has(option.image) ? ' — unavailable' : ''}`} aria-pressed={option.id === selected} title={option.label} onClick={() => onSelect(option.id)}>
-        {mode === 'paint' ? <span className="paint-chip" style={{ backgroundColor: option.color, color: option.id === 'graphite' ? '#fff' : '#111' }}>{option.id === selected && <Check size={14}/>}</span> : <span className="wheel-chip" style={{ backgroundImage: `url("${option.image}")` }}/>} 
+      {options.map(option => <button key={option.id} className={`appearance-option ${option.id === (current?.id ?? options[0].id) ? 'selected' : ''}`} disabled={waiting || !loaded.has(option.image)} aria-label={`${option.label}${unavailable.has(option.image) ? ' — unavailable' : ''}`} aria-pressed={option.id === (current?.id ?? options[0].id)} title={option.label} onClick={() => onSelect(option.id)}>
+        {mode === 'paint' ? <span className="paint-chip" style={{ backgroundColor: option.color, color: option.id === 'graphite' ? '#fff' : '#111' }}>{option.id === (current?.id ?? options[0].id) && <Check size={14}/>}</span> : <span className="wheel-chip" style={{ backgroundImage: `url("${option.image}")` }}/>} 
       </button>)}
     </div>
-    <div className="appearance-caption" aria-live="polite">{waiting ? 'Returning to exterior…' : current.label}<small>{unavailable.size ? 'Some options could not load' : 'Close to explore other systems'}</small></div>
+    <div className="appearance-caption" aria-live="polite">{waiting ? 'Returning to exterior…' : current.label}<small>{unavailable.size ? 'Some options could not load' : 'Selection saved. Close to explore other systems'}</small></div>
   </div>
 }

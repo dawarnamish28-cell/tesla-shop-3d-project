@@ -9,5 +9,5 @@ generated/
 Thumbs.db
 .openai/
 .codex/
-.claude/settings.local.json
 tmp/
+scratch/

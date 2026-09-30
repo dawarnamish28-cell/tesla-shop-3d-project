@@ -8,6 +8,19 @@ import { appearanceOptions, baseExterior, canUseHotspot, type AppearanceMode } f
 type Phase = 'overview' | 'entering' | 'detail' | 'returning'
 const ROOT_IMAGE = '/media/exterior-polished.png'
 
+const SAVED_EXTERIOR_KEY = 'tesla_model3_exterior'
+const SAVED_PAINT_KEY = 'tesla_model3_paint'
+const SAVED_WHEELS_KEY = 'tesla_model3_wheels'
+
+function getSavedItem(key: string, fallback: string): string {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(key) || fallback
+    }
+  } catch {}
+  return fallback
+}
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>('overview')
   const [selected, setSelected] = useState<SystemId>('battery')
@@ -23,7 +36,7 @@ export default function App() {
   const [optionId, setOptionId] = useState('silver')
   const [appearanceImage, setAppearanceImage] = useState(baseExterior)
   const [neutral, setNeutral] = useState(true)
-  const [loadedOptions, setLoadedOptions] = useState(() => new Set([baseExterior]))
+  const [loadedOptions, setLoadedOptions] = useState(() => new Set([baseExterior, ...Object.values(appearanceOptions).flat().map(o => o.image)]))
   const [failedOptions, setFailedOptions] = useState<Set<string>>(() => new Set())
   const optionLoads = useRef(new Set<string>())
   const appearanceTimer = useRef<number>()
@@ -36,6 +49,9 @@ export default function App() {
   const revealTimer = useRef<number>()
   const stage = useRef<HTMLElement>(null)
   const [plane, setPlane] = useState<CSSProperties>({})
+  const [carExterior, setCarExterior] = useState(() => getSavedItem(SAVED_EXTERIOR_KEY, ROOT_IMAGE))
+  const [activePaint, setActivePaint] = useState(() => getSavedItem(SAVED_PAINT_KEY, 'silver'))
+  const [activeWheels, setActiveWheels] = useState(() => getSavedItem(SAVED_WHEELS_KEY, 'original'))
   const closeButton = useRef<HTMLButtonElement>(null)
   const entryButtons = useRef<Partial<Record<SystemId, HTMLButtonElement | null>>>({})
   const current = systems[selected]
@@ -71,9 +87,16 @@ export default function App() {
     if (phase !== 'overview' || !canUseHotspot(appearance, mode, appearanceClosing)) return
     clearTimeout(leaveTimer.current)
     setHovered(null)
-    if (appearance === mode) return
+    if (appearance === mode) {
+      setAppearancePinned(true)
+      return
+    }
     setAppearance(mode); setAppearancePinned(false)
-    setOptionId(appearanceOptions[mode][0].id); setAppearanceImage(baseExterior)
+    const initialOption = (typeof window !== 'undefined' && window.localStorage)
+      ? (mode === 'paint' ? (window.localStorage.getItem(SAVED_PAINT_KEY) || 'silver') : (window.localStorage.getItem(SAVED_WHEELS_KEY) || 'original'))
+      : appearanceOptions[mode][0].id
+    setOptionId(initialOption)
+    setAppearanceImage(carExterior)
   }
 
   function closeAppearance(restoreFocus = true) {
@@ -85,9 +108,11 @@ export default function App() {
       setAppearance(null); setAppearancePinned(false); setAppearanceClosing(false)
       setAppearanceImage(baseExterior)
       if (restoreFocus) {
-        suppressFocus.current = true
-        appearanceButtons.current[previousMode]?.focus({ preventScroll: true })
-        suppressFocus.current = false
+        setTimeout(() => {
+          suppressFocus.current = true
+          appearanceButtons.current[previousMode]?.focus({ preventScroll: true })
+          suppressFocus.current = false
+        }, 16)
       }
     }, reduced ? 0 : 260)
   }
@@ -97,6 +122,20 @@ export default function App() {
     const option = appearanceOptions[appearance].find(item => item.id === id)
     if (!option || !loadedOptions.has(option.image)) return
     setAppearancePinned(true); setOptionId(id); setAppearanceImage(option.image)
+    setCarExterior(option.image)
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(SAVED_EXTERIOR_KEY, option.image)
+        if (appearance === 'paint') {
+          window.localStorage.setItem(SAVED_PAINT_KEY, id)
+          setActivePaint(id)
+        }
+        if (appearance === 'wheels') {
+          window.localStorage.setItem(SAVED_WHEELS_KEY, id)
+          setActiveWheels(id)
+        }
+      }
+    } catch {}
   }
 
   useEffect(() => {
@@ -106,7 +145,7 @@ export default function App() {
       const mobile = width <= 900
       // Keep the frame, media and hotspots on one unchanged coordinate plane.
       // The shared width also aligns the masthead, title and supporting copy.
-      const mediaHeight = Math.max(700, window.innerHeight) - (window.innerHeight <= 780 ? 64 : 76) - 164 - 88
+      const mediaHeight = Math.max(700, window.innerHeight) - (window.innerHeight <= 780 ? 64 : 76) - 204 - 88
       const w = mobile ? width - 40 : Math.min(width - 2 * Math.min(72, Math.max(24, width * .04)), mediaHeight * 1672 / 941)
       const h = w * 941 / 1672
       setPlane({ width: w, height: h, left: (width - w) / 2, top: mobile ? 132 : 88 })
@@ -119,7 +158,7 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([ROOT_IMAGE, systems.battery.image, systems.drive.image].map(source => new Promise<void>((resolve, reject) => {
+    Promise.all([ROOT_IMAGE, systems.battery.image, systems.drive.image, systems.optics.image, systems.cabin.image, systems.autopilot.image, systems.chassis.image, systems.door.image, ...Object.values(appearanceOptions).flat().map(o => o.image)].map(source => new Promise<void>((resolve, reject) => {
       const image = new Image()
       image.onload = () => { image.decode().then(resolve, resolve) }
       image.onerror = reject
@@ -137,7 +176,7 @@ export default function App() {
   }
 
   function transition(id: SystemId, returning = false) {
-    if (id === 'optics' || appearance || lock.current || !ready || (!returning && phase !== 'overview')) return
+    if (appearance || lock.current || !ready || (!returning && phase !== 'overview')) return
     lock.current = true
     const token = ++request.current
     setSelected(id); setHovered(null); setAnnotation(null); setError('')
@@ -156,33 +195,38 @@ export default function App() {
   })
 
   return <main className={`experience phase-${phase} ${reduced ? 'reduced' : ''}`} style={{ '--scene-width': typeof plane.width === 'number' ? `${plane.width}px` : undefined, '--scene-height': typeof plane.height === 'number' ? `${plane.height}px` : undefined } as CSSProperties} aria-busy={busy}>
-    <header className="masthead">
-      <a className="wordmark" href="/" aria-label="Return to overview">VEYRA</a>
-      <span className="header-middle">Electric vehicle design</span>
-      <span className="concept-label">Independent concept</span>
-    </header>
+    <header className="masthead" aria-label="Vehicle studio" />
 
-    <section ref={stage} className="stage" aria-label="Explore vehicle systems">
+    <section ref={stage} className="stage" aria-label="Explore vehicle systems" onClick={event => {
+      if (appearance && !appearanceClosing && (event.target === stage.current || (event.target as HTMLElement).classList.contains('stage'))) closeAppearance()
+    }}>
       <div className="image-plane" style={{ ...plane, '--focus-x': `${current.anchor.x}%`, '--focus-y': `${current.anchor.y}%` } as CSSProperties}>
         <div className="media-envelope"><div className="exterior-envelope">
-        <div className="car-visual"><img className="car-image" src={ROOT_IMAGE} alt="Silver electric concept sedan in a studio" draggable={false}/><HoverVideo desired={!appearance && (hovered === 'drive' || hovered === 'battery') ? hovered : null} mode={phase} reduced={reduced} onNeutral={setNeutral}/><div className={`appearance-visual ${appearance && neutral && !appearanceClosing ? 'shown' : ''}`} aria-hidden="true"><img src={appearanceImage} alt="" draggable={false}/></div></div>
+        <div className={`car-visual ${neutral && carExterior !== ROOT_IMAGE ? 'settled-custom' : ''}`}>
+          <img className="car-image" src={carExterior} alt="Electric concept sedan in a studio" draggable={false}/>
+          <div className={`optics-glow ${hovered === 'optics' ? 'active' : ''}`} aria-hidden="true" />
+          <div className={`cabin-glow ${hovered === 'cabin' ? 'active' : ''}`} aria-hidden="true" />
+          <div className={`autopilot-glow ${hovered === 'autopilot' ? 'active' : ''}`} aria-hidden="true" />
+          <div className={`door-glow ${hovered === 'door' ? 'active' : ''}`} aria-hidden="true" />
+          <div className={`chassis-glow ${hovered === 'chassis' ? 'active' : ''}`} aria-hidden="true" />
+          <HoverVideo desired={!appearance && (hovered === 'drive' || hovered === 'battery') ? hovered : null} mode={phase} reduced={reduced} onNeutral={setNeutral}/>
+          <div className={`appearance-visual ${appearance && neutral && !appearanceClosing ? 'shown' : ''}`} aria-hidden="true"><img src={appearanceImage} alt="" draggable={false}/></div>
+        </div>
         </div><div className={`detail-visual ${detailVisible ? 'shown' : ''}`}><img className="detail-image" src={current.image} alt={`Illustrative cutaway of the ${current.label.toLowerCase()}`} draggable={false}/></div>
         </div>
 
         {phase === 'overview' && ready && hotspots.map(item => {
           const { id, target } = item
           const enabled = canUseHotspot(appearance, id, appearanceClosing)
-          if (id === 'paint' || id === 'wheels') return <div key={id} className={`appearance-hotspot ${appearance === id ? 'expanded' : ''}`} style={{ '--anchor-x': `${item.anchor.x}%`, '--anchor-y': `${item.anchor.y}%` } as CSSProperties} onPointerEnter={() => openAppearance(id)} onPointerLeave={event => {
-            if (!appearancePinned && !event.currentTarget.contains(document.activeElement)) leaveTimer.current = window.setTimeout(() => closeAppearance(false), 140)
-          }} onBlur={event => {
+          if (id === 'paint' || id === 'wheels') return <div key={id} className={`appearance-hotspot ${appearance === id ? 'expanded' : ''}`} style={{ '--anchor-x': `${item.anchor.x}%`, '--anchor-y': `${item.anchor.y}%` } as CSSProperties} onBlur={event => {
             if (!appearancePinned && !event.currentTarget.contains(event.relatedTarget)) closeAppearance(false)
           }}>
-            <button ref={node => { appearanceButtons.current[id] = node }} className={`hotspot ${appearance === id ? 'active' : ''}`} disabled={!enabled} onFocus={() => { if (!suppressFocus.current) openAppearance(id) }} onClick={() => {
-              if (appearance === id && appearancePinned) closeAppearance()
+            <button ref={node => { appearanceButtons.current[id] = node }} className={`hotspot ${appearance === id ? 'active' : hovered === id ? 'active' : ''}`} disabled={!enabled} onPointerEnter={() => { if (enabled) setHovered(id) }} onPointerLeave={() => setHovered(null)} onFocus={() => { if (!suppressFocus.current) openAppearance(id) }} onClick={() => {
+              if (appearance === id) closeAppearance()
               else { openAppearance(id); setAppearancePinned(true) }
             }} aria-expanded={appearance === id && !appearanceClosing} aria-controls={`appearance-${id}`} aria-label={item.label}>
-              <span className="hotspot-ring">{appearance === id && appearancePinned ? <X size={14} strokeWidth={1.5}/> : <Plus size={14} strokeWidth={1.5}/>}</span>
-              <span className="hotspot-label">{id === 'paint' ? 'Paint' : 'Wheels'}</span>
+              <span className="hotspot-ring">{appearance === id ? <X size={14} strokeWidth={1.5}/> : <Plus size={14} strokeWidth={1.5}/>}</span>
+              <span className="hotspot-label">{id === 'paint' ? 'Body colour' : 'Wheel design'}</span>
             </button>
             {appearance === id && !appearanceClosing && <span className="menu-bridge" aria-hidden="true"/>}
             {appearance === id && !appearanceClosing && <AppearanceMenu mode={id} selected={optionId} loaded={loadedOptions} unavailable={failedOptions} waiting={!neutral} onSelect={chooseAppearance} onClose={() => closeAppearance()}/>}
@@ -197,7 +241,14 @@ export default function App() {
       </div>
 
       <div className={`intro ${phase !== 'overview' ? 'hide' : ''}`} aria-hidden={phase !== 'overview'}>
-        <h1>Electric, inside out.</h1><p className="intro-description"><span>Explore beneath the surface.</span><span>Select a point to begin.</span></p>
+        <div className="intro-heading-group">
+          <span className="intro-badge">SYSTEMS ARCHITECTURE</span>
+          <h1>Electric, inside out.</h1>
+        </div>
+        <p className="intro-description">
+          <span>Explore beneath the surface.</span>
+          <span>Select an inspection node to begin.</span>
+        </p>
       </div>
 
       {phase !== 'overview' && <button ref={closeButton} className="back" onClick={returnToCar} disabled={busy} aria-label="Back to vehicle"><ArrowLeft size={18}/><span>{phase === 'returning' ? 'Returning to vehicle' : 'Back to vehicle'}</span><kbd>Esc</kbd></button>}
@@ -219,12 +270,27 @@ export default function App() {
 
     <footer className="scene-footer">
       <div className="feature-notes" aria-label="Ways to explore">
-        <div className="feature-note"><h3>Electric drive</h3><p>Lift the hood. Explore how the motor turns electricity into motion.</p></div>
-        <div className="feature-note"><h3>Battery architecture</h3><p>Look beneath the body. Discover the energy stored under the cabin.</p></div>
-        <div className="feature-note"><h3>Body finishes</h3><p>Five colours. From studio silver to a vivid electric green.</p></div>
-        <div className="feature-note"><h3>Wheel designs</h3><p>Three expressions. Compare multi-spoke, aero and forged wheels.</p></div>
+        <div className="feature-note"><span className="feature-index">01</span><h3>Electric drive</h3><p>Instant torque delivered to the wheels through high-efficiency gearing.</p></div>
+        <div className="feature-note"><span className="feature-index">02</span><h3>Matrix LED optics</h3><p>Adaptive projection optics shape glare-free high-precision lighting beams.</p></div>
+        <div className="feature-note"><span className="feature-index">03</span><h3>Tesla Vision</h3><p>360° neural network perception for full autonomous navigation.</p></div>
+        <div className="feature-note"><span className="feature-index">04</span><h3>Cabin architecture</h3><p>Minimalist cockpit with 15.4" display and all-glass acoustic canopy.</p></div>
+        <div className="feature-note"><span className="feature-index">05</span><h3>Door & interior</h3><p>Acoustic laminated dual-pane glass, spatial audio, and tactile armrest.</p></div>
+        <div className="feature-note"><span className="feature-index">06</span><h3>Battery pack</h3><p>Structural low-mounted high-energy density cells under the cabin floor.</p></div>
+        <div className="feature-note"><span className="feature-index">07</span><h3>Performance chassis</h3><p>Carbon-ceramic brakes and progressive independent coilover damping.</p></div>
+        <div className="feature-note"><span className="feature-index">08</span><h3>Wheel designs</h3><p>Three expressions. Multi-spoke, aero efficiency, and sport forged.</p></div>
       </div>
-      <div className="footer-baseline"><span>VEYRA — Design study</span><span>{phase === 'overview' ? 'Explore systems. Personalise the exterior.' : 'Illustrative engineering. Concept visualisation.'}</span></div>
+      <div className="footer-baseline">
+        <div className="baseline-left">
+          <span className="baseline-brand">TESLA</span>
+          <span className="baseline-divider">/</span>
+          <span className="baseline-model">MODEL 3</span>
+          <span className="baseline-divider">·</span>
+          <span className="baseline-spec">AWD · DUAL MOTOR · 0.219 CD</span>
+        </div>
+        <div className="baseline-right">
+          <span>{phase === 'overview' ? 'Interactive systems architecture. Personalise exterior.' : 'Illustrative engineering study. Concept visualisation.'}</span>
+        </div>
+      </div>
     </footer>
     <p className="sr-only" role="status" aria-live="polite">{busy ? `${phase === 'entering' ? 'Opening' : 'Closing'} ${current.label}` : phase === 'detail' ? `${current.label} view. Press Escape to return.` : 'Vehicle overview. Choose a system.'}</p>
     {error && <div className="error-message" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss message"><X size={16}/></button></div>}
